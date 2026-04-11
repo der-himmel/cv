@@ -1,3 +1,3 @@
-1. установить зависимости: pip install pillow pip install opencv-python
+1. установить зависимости: poetry install
 2. запустить программу: python .\main.py 
    *опционально указать индекс источника видео, например: python .\main.py 0
