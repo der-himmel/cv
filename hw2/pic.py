@@ -20,12 +20,12 @@ def detect_screen(image, min_contour_size=10000):
 
     screen_contour = None
     for contour in contours:
-        if cv2.contourArea(contour) < min_contour_size:  # Пропускаем маленькие контуры
+        if cv2.contourArea(contour) < min_contour_size:
             continue
         peri = cv2.arcLength(contour, True)
         approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
 
-        if len(approx) == 4:  # Ищем прямоугольник
+        if len(approx) == 4:
             screen_contour = approx.reshape(4, 2)
             break
 
