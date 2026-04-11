@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-def detect_screen(image):
+def detect_screen(image, min_contour_size=10000):
     """
     Функция для поиска экрана на изображении.
     Преобразует изображение в оттенки серого, затем применяет гауссовское размытие и выделяет границы
@@ -20,7 +20,7 @@ def detect_screen(image):
 
     screen_contour = None
     for contour in contours:
-        if cv2.contourArea(contour) < 5000:  # Пропускаем маленькие контуры
+        if cv2.contourArea(contour) < min_contour_size:  # Пропускаем маленькие контуры
             continue
         peri = cv2.arcLength(contour, True)
         approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
@@ -47,15 +47,14 @@ def is_shut_off_screen(image, screen_contour):
     screen_area = cv2.bitwise_and(image, image, mask=mask)
 
     gray_screen = cv2.cvtColor(screen_area, cv2.COLOR_BGR2GRAY)
-    edges_in_screen = cv2.Canny(gray_screen, 50, 150)
+    edges_in_screen = cv2.Canny(gray_screen, 50, 200)
 
     edge_count = cv2.countNonZero(edges_in_screen)
 
-    #TODO: пофиксить определение выключенного экрана
-    if edge_count == 0:
+    if edge_count <= cv2.contourArea(screen_contour) * 0.025:
         return True
     else:
-        return True
+        return False
 
 def apply_perspective_transform(image, screen_contour, slide_image):
     """
@@ -115,15 +114,22 @@ def process_img(base_img_path, slide_img_path, output_path):
         print("Ошибка загрузки изображений.")
         return
 
-    screen_contour = detect_screen(base)
+    screeen = False # Нашли ли экран
+    min_contour_size = 10000
 
-    if screen_contour is not None:
-        if is_shut_off_screen(base, screen_contour):
-            result_image = apply_perspective_transform(base, screen_contour, slide)
-            cv2.imwrite(output_path, result_image)
+    while not screeen:
+        screen_contour = detect_screen(base, min_contour_size)
+
+        if screen_contour is not None:
+            if is_shut_off_screen(base, screen_contour):
+                screeen = True
         else:
-            print("Экран не выключен.")
-    else:
-        print("Экран не найден.")
+            print("Экран не найден.")
+        
+        min_contour_size += 10000   # Ищем другой экран большего размера
 
+    result_image = apply_perspective_transform(base, screen_contour, slide)
+    cv2.imwrite(output_path, result_image)
+
+process_img("tv.jpg", "slide.jpg", "result.jpg")
 process_img("tv_perspective.jpg", "slide.jpg", "result_perspective.jpg")
