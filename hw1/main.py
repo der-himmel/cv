@@ -126,7 +126,6 @@ def main():
         if not ret:
             on_close()
             return
-        print(frame.shape)
 
         frame = cv2.resize(frame, (WIDTH, HEIGHT))
         cv2image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
