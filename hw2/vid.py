@@ -41,21 +41,53 @@ def is_shut_off_screen(image, screen_contour):
     Создается маска для области экрана, на которой далее проводится поиск контуров.
     Если внутри экрана нет значимых контуров, экран считается выключенным.
     """
-    mask = np.zeros(image.shape[:2], dtype=np.uint8)
-    cv2.drawContours(mask, [screen_contour], -1, 255, thickness=cv2.FILLED)
+    pts = order_screen_edges(screen_contour).astype(np.float32)
 
-    screen_area = cv2.bitwise_and(image, image, mask=mask)
+    width = int(max(
+        np.linalg.norm(pts[0] - pts[1]),
+        np.linalg.norm(pts[2] - pts[3])
+    ))
+    height = int(max(
+        np.linalg.norm(pts[0] - pts[3]),
+        np.linalg.norm(pts[1] - pts[2])
+    ))
 
-    gray_screen = cv2.cvtColor(screen_area, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray_screen, (7, 7), 1.5)
-    edges_in_screen = cv2.Canny(blurred, 50, 200)
-
-    edge_count = cv2.countNonZero(edges_in_screen)
-
-    if edge_count <= cv2.contourArea(screen_contour) * 0.02:
-        return True
-    else:
+    if width <= 0 or height <= 0:
         return False
+
+    dst = np.array([
+        [0, 0],
+        [width - 1, 0],
+        [width - 1, height - 1],
+        [0, height - 1]
+    ], dtype=np.float32)
+
+    H = cv2.getPerspectiveTransform(pts, dst)
+    screen = cv2.warpPerspective(image, H, (width, height))
+
+    margin_x = int(width * 0.08)
+    margin_y = int(height * 0.08)
+
+    inner = screen[margin_y:height - margin_y, margin_x:width - margin_x]
+
+    if inner.size == 0:
+        return False
+
+    gray = cv2.cvtColor(inner, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (7, 7), 1.5)
+
+    edges = cv2.Canny(blurred, 50, 150)
+    edge_ratio = cv2.countNonZero(edges) / edges.size
+
+    brightness_std = np.std(gray)
+    _, bright_mask = cv2.threshold(gray, 120, 255, cv2.THRESH_BINARY)
+    bright_ratio = cv2.countNonZero(bright_mask) / bright_mask.size
+
+    return (
+        edge_ratio < 0.025 and
+        brightness_std < 50 and
+        bright_ratio < 0.1
+    )
 
 def apply_perspective_transform(image, screen_contour, slide_image):
     """
@@ -113,10 +145,11 @@ def process_video(input_video_path, slide_img_path, output_video_path):
         print("Ошибка при открытии видео.")
         return
 
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     fps = cap.get(cv2.CAP_PROP_FPS)
     frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     out = cv2.VideoWriter(output_video_path, fourcc, fps, (frame_width, frame_height))
 
     slide = cv2.imread(slide_img_path)
@@ -132,7 +165,7 @@ def process_video(input_video_path, slide_img_path, output_video_path):
         screeen = False
         min_contour_size, counter = 100000, 0
         
-        # TODO: исправить определение экрана (сейчас детектор срабатывает на доску)
+        result_frame = frame.copy()
         while not screeen and counter <= 10:
             screen_contour = detect_screen(frame, min_contour_size)
             if screen_contour is not None:
