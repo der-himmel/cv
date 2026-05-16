@@ -3,7 +3,7 @@ import numpy as np
 
 def order_box_edges(pts):
     """
-    Упорядочивает вершины QR-кода (4 точки) так, чтобы они шли по часовой стрелек от верхней левой точки
+    Упорядочивает вершины QR-кода (4 точки) так, чтобы они шли по часовой стрелке от верхней левой точки
     """
     rect = np.zeros((4, 2), dtype="float32")
     s = pts.sum(axis=1)
@@ -19,7 +19,6 @@ def decode_qr_code_cv2(img):
     data, bbox, straight_qrcode = detector.detectAndDecode(img)
     
     if data:
-        # Optionally, draw a bounding box (bbox contains corner coordinates)
         if bbox is not None:
             for i in range(len(bbox[0])):
                 pt1 = tuple(bbox[0][i].astype(int))
@@ -33,53 +32,75 @@ def decode_qr_code_cv2(img):
 def correct_perspective(img, src_points):
     src = np.float32(src_points)
         
-    half_width = int(img.shape[0]/2)
-    half_height = int(img.shape[1]/2)
-    size = min(half_height, half_width)
+    q_width = int(img.shape[0]/4)
+    q_height = int(img.shape[1]/4)
+    size = min(q_height, q_width)
     
     destination_points = [[0, 0], [size , 0], [size , size], [0, size]]
     dst = np.float32(destination_points)
     output_dimensions = (size, size)
-    shape = [size, size]
 
     M = cv2.getPerspectiveTransform(src, dst)
     warped_image = cv2.warpPerspective(img, M, output_dimensions)
-    return warped_image, shape
+    return warped_image
+
+def calculate_pov_degree(rectangle):
+    """
+    Рассчитывает угол поворота QR-кода
+    """
+    top = rectangle[1][0] - rectangle[0][0]
+    bottom = rectangle[2][0] - rectangle[3][0] 
+    left = rectangle[3][1] - rectangle[0][1]
+    right = rectangle[2][1] - rectangle[1][1]
+
+    degree_x = np.arccos(min(top,bottom)/max(top,bottom))
+    degree_y = np.arccos(min(left,right)/max(left,right))
+
+    return np.degrees(degree_x), np.degrees(degree_y)
+
+def put_text_on_frame(frame, text):
+    """
+    Наложение текста на кадр
+    """
+    cv2.putText(frame, text, (25, frame.shape[0] - 25), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
+    return frame
+
 
 def main():
     cap = cv2.VideoCapture(0, cv2.CAP_ANY)
-    
+    degree_x_max, degree_y_max = 0.0, 0.0
+
     while True:
         ret, frame = cap.read()
-        bbox = []
+        frame_mod = frame.copy()
+        degree_x, degree_y = 0.0, 0.0
         img, data, straight_qrcode, bbox = decode_qr_code_cv2(frame)
         if data:
-            width = img.shape[0]
-            height = img.shape[0]
-            print(width, height)
             ordered_points = order_box_edges(bbox[0])
-            corrected_img, corrected_img_shape = correct_perspective(img, bbox[0])
-            if corrected_img_shape:
-                img_copy = img.copy()
-                overlay_coords = [int(width - corrected_img_shape[0]/4), int(height- + corrected_img_shape[1]/4)]
-                print(overlay_coords)
-                img_copy[overlay_coords[0],overlay_coords[1],:] = corrected_img[overlay_coords[0],overlay_coords[1],:]
-        cv2.imshow('QR detector', img)
+            
+            degree_x, degree_y = calculate_pov_degree(ordered_points)
+            if degree_x > degree_x_max:
+                degree_x_max = degree_x
+            if degree_y > degree_y_max:
+                degree_y_max = degree_y
+
+            frame_mod = put_text_on_frame(frame_mod, f"x:{degree_x:.1f}, y:{degree_y:.1f} -- {data}")
+            corrected_img = correct_perspective(img, bbox[0])
+            try:
+                if corrected_img is not None:
+                    target_h = frame_mod.shape[0] // 4
+                    target_w = frame_mod.shape[1] // 4
+
+                    corrected_resized = cv2.resize(corrected_img, (target_w, target_h))
+
+                    frame_mod[0:target_h, 0:target_w] = corrected_resized
+            except Exception as e:
+                print(e)
+        cv2.imshow('QR detector', frame_mod)
         if cv2.waitKey(1) == ord('q'):
+            print(f"max x:{degree_x_max:.2f}, y:{degree_y_max:.2f}")
             cv2.destroyAllWindows()
             break
-    
-    # img = cv2.imread('qr3_bad.jpg')
-    # img, data, straight_qrcode, bbox = decode_qr_code_cv2(img)
-    # if len(bbox[0])>0:
-    #     ordered_points = order_box_edges(bbox[0])
-    #     corrected_img = correct_perspective(img, bbox[0])
-    #     if corrected_img is not None:
-    #     # if img is not None:
-    #         cv2.imwrite('qr2_fixed.jpg', corrected_img)
-    #         cv2.imshow("Corrected Image", corrected_img)
-    #         cv2.waitKey(0)
-    #         cv2.destroyAllWindows()
-        
+
 if __name__ == "__main__":
     main()
